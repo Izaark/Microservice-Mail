@@ -6,8 +6,11 @@ import (
 	"github.com/gin-gonic/gin"
 	cors "github.com/itsjamie/gin-cors"
 	"github.com/tasks/Microservice-Mail/models"
+	//"gopkg.in/gomail.v2"
+	"io"
 	"log"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"time"
@@ -17,9 +20,11 @@ const ctimeLayout = "2006-01-02T15:04:05.000Z"
 
 var strFromEmail string
 var strPasswordEmail string
+var envLogType string
+var envLogFile string
 
+//checkError: func for generate error and logs
 func checkError(strMessage string, err error) {
-
 	if err != nil {
 		err = errors.New(strMessage + "->" + err.Error())
 		log.Println(err)
@@ -28,15 +33,35 @@ func checkError(strMessage string, err error) {
 }
 
 func MailRouter() {
-	/*var osLogFile *os.File
+	var osLogFile *os.File
 	var err error
+	//type deploy Mode
+	if os.Getenv("ENV_DEPLOY_MODE") == "DEBUG" {
+		gin.SetMode(gin.DebugMode)
 
-	osLogFile, err = os.Create(os.Getenv("ENV_LOG_FILE") + "." + time.Now().UTC().Format(ctimeLayout))
-	defer osLogFile.Close()
-
-	checkError("ERROR MailRouter: couldn't create log file", err)
-	log.SetOutput(osLogFile)
-	fmt.Println(osLogFile)*/
+	} else if os.Getenv("ENV_DEPLOY_MODE") == "RELEASE" {
+		gin.SetMode(gin.ReleaseMode)
+	} else {
+		fmt.Println("ERROR MailRouter: invalid environment mode")
+		return
+	}
+	//logFile
+	envLogType = os.Getenv("ENV_LOG_TYPE")
+	envLogFile = os.Getenv("ENV_LOG_FILE")
+	if envLogType == "FILE" || envLogType == "MIXED" {
+		osLogFile, err = os.Create(envLogFile + "." + time.Now().UTC().Format(ctimeLayout))
+		defer osLogFile.Close()
+		checkError("ERROR MailRouter: couldn't create log file", err)
+	}
+	switch envLogType {
+	case "FILE":
+		gin.DefaultWriter = io.MultiWriter(osLogFile)
+	case "MIXED":
+		gin.DefaultWriter = io.MultiWriter(osLogFile, os.Stdout)
+	case "CONSOLE":
+		gin.DefaultWriter = io.MultiWriter(os.Stdout)
+	}
+	log.SetOutput(gin.DefaultWriter)
 
 	router := gin.Default()
 	//CORS
@@ -59,24 +84,21 @@ func MailRouter() {
 	router.Run(":" + os.Getenv("API_PORT"))
 }
 
+//handlerSendEmail: send a mail from frontend whit a specific struct
 func handlerSendEmail(c *gin.Context) {
 	var vEmail models.ObjUserInfo
 	var vginResponse gin.H
 	var err error
 
-	idUser := vEmail.Id
-	strToEmail := vEmail.Email
-	strBody := vEmail.Body
-
 	err = c.BindJSON(&vEmail)
-	fmt.Println(vEmail)
+
 	if err != nil {
 		err = errors.New("ERROR handlerSendEmail: couldn't bind payload provided ObjUserInfo struct -> " + err.Error())
 		vginResponse = gin.H{"message": "error reading payload provided", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
 		c.JSON(http.StatusBadRequest, vginResponse)
 		return
 	}
-	err = funSendEmail(idUser, strToEmail, strBody)
+	err = funSendEmail(vEmail.Email, vEmail.Body)
 	if err != nil {
 		err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
 		vginResponse = gin.H{"message": "error reading payload provided", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
@@ -84,19 +106,38 @@ func handlerSendEmail(c *gin.Context) {
 		return
 	}
 
-	vginResponse = gin.H{"message": "Message send :D", "response": vEmail, "error": nil, "status": http.StatusOK}
+	vginResponse = gin.H{"message": "Message send !", "response": vEmail.Email, "error": nil, "status": http.StatusOK}
 	c.JSON(http.StatusOK, vginResponse)
 
 }
 
-func funSendEmail(idUser, strToEmail, strBody string) error {
+//funSendEmail: generate struct email whit text
+//ToDo Send email whit a template in html & code switch depends email send
+func funSendEmail(strToEmail, strBody string) error {
+	fromAddress := mail.Address{"Administración: ", os.Getenv("FROM_EMAIL")}
 	strFromEmail = os.Getenv("FROM_EMAIL")
 	strPasswordEmail = os.Getenv("FROM_EMAIL_PASSWORD")
 
-	message := "From: " + strFromEmail + "\n" + "To: " + strToEmail + "\n" + "Subject: Hello there\n\n" + strBody
+	message := "From: " + fromAddress.String() + "\n" + "To: " + strToEmail + "\n" + "Subject: Bienvenid@\n\n" + strBody
 
-	err := smtp.SendMail("smtp.gmail.com:465", smtp.PlainAuth("", strFromEmail, strPasswordEmail, "smtp.gmail.com"), strFromEmail, []string{strToEmail}, []byte(message))
-	checkError("Error funSendEmail, couldn't get credentials", err)
+	err := smtp.SendMail("smtp.gmail.com:587", smtp.PlainAuth("", strFromEmail, strPasswordEmail, "smtp.gmail.com"), strFromEmail, []string{strToEmail}, []byte(message))
+	checkError("Error funSendEmail: error smtp to get credentials", err)
 	return nil
 
+}
+
+//ToDo create logic for send email whit attachment
+func funSendEmailAttach() {
+	/*m := gomail.NewMessage()
+	m.SetHeader("From", os.Getenv("FROM_EMAIL"))
+	m.SetHeader("To", strToEmail)
+	m.SetHeader("Subject", "Bienvenid@")
+	m.SetBody("text/html", strBody)
+
+	d := gomail.NewDialer("smtp.gmail.com", 465, strFromEmail, strPasswordEmail)
+
+	// Send the email to Bob, Cora and Dan.
+	if err := d.DialAndSend(m); err != nil {
+		fmt.Println(err)
+	}*/
 }
