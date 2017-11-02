@@ -6,13 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 	cors "github.com/itsjamie/gin-cors"
 	"github.com/tasks/Microservice-Mail/models"
-	//"gopkg.in/gomail.v2"
+	"gopkg.in/gomail.v2"
 	"io"
 	"log"
 	"net/http"
 	"net/mail"
 	"net/smtp"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -79,12 +80,13 @@ func MailRouter() {
 	mail := router.Group("api")
 	{
 		mail.POST("/users/email/text", handlerSendEmail)
+		mail.POST("/users/email/file", handlerSendEmail)
 	}
 
 	router.Run(":" + os.Getenv("API_PORT"))
 }
 
-//handlerSendEmail: send a mail from frontend whit a specific struct
+//handlerSendEmail: send the mail from frontend whit a specific struct
 func handlerSendEmail(c *gin.Context) {
 	var vEmail models.ObjUserInfo
 	var vginResponse gin.H
@@ -98,23 +100,39 @@ func handlerSendEmail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, vginResponse)
 		return
 	}
-	err = funSendEmail(vEmail.Email, vEmail.Body)
-	if err != nil {
-		err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
-		vginResponse = gin.H{"message": "error reading payload provided", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
-		c.JSON(http.StatusBadRequest, vginResponse)
-		return
+
+	//send the email depending by strKey
+	strURL := strings.TrimPrefix(c.Request.RequestURI, "/api/users/email/")
+	strKey := strings.Split(strURL, "/")[0]
+
+	switch strKey {
+	case "text":
+		err = funSendEmail(vEmail.Email, vEmail.Body)
+		if err != nil {
+			err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
+			vginResponse = gin.H{"message": "error funSendEmail", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
+			c.JSON(http.StatusBadRequest, vginResponse)
+			return
+		}
+	case "file":
+		err = funSendEmailAttach(vEmail.Email, vEmail.Body)
+		if err != nil {
+			err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
+			vginResponse = gin.H{"message": "error funSendEmailAttach", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
+			c.JSON(http.StatusBadRequest, vginResponse)
+			return
+		}
 	}
 
-	vginResponse = gin.H{"message": "Message send !", "response": vEmail.Email, "error": nil, "status": http.StatusOK}
+	vginResponse = gin.H{"message": "Message send", "response": vEmail.Email, "error": nil, "status": http.StatusOK}
 	c.JSON(http.StatusOK, vginResponse)
 
 }
 
 //funSendEmail: generate struct email whit text
-//ToDo Send email whit a template in html & code switch depends email send
+//ToDo: Send email whit a template in html
 func funSendEmail(strToEmail, strBody string) error {
-	fromAddress := mail.Address{"Administración: ", os.Getenv("FROM_EMAIL")}
+	fromAddress := mail.Address{"Administración:", os.Getenv("FROM_EMAIL")}
 	strFromEmail = os.Getenv("FROM_EMAIL")
 	strPasswordEmail = os.Getenv("FROM_EMAIL_PASSWORD")
 
@@ -126,18 +144,22 @@ func funSendEmail(strToEmail, strBody string) error {
 
 }
 
-//ToDo create logic for send email whit attachment
-func funSendEmailAttach() {
-	/*m := gomail.NewMessage()
-	m.SetHeader("From", os.Getenv("FROM_EMAIL"))
-	m.SetHeader("To", strToEmail)
-	m.SetHeader("Subject", "Bienvenid@")
-	m.SetBody("text/html", strBody)
+//funSendEmailAttach: Send email whit files, in this case is a image !
+func funSendEmailAttach(strToEmail, strBody string) error {
+	fromAddress := mail.Address{"Soporte Técnico", os.Getenv("FROM_EMAIL")}
+	strFromEmail = os.Getenv("FROM_EMAIL")
+	strPasswordEmail = os.Getenv("FROM_EMAIL_PASSWORD")
 
-	d := gomail.NewDialer("smtp.gmail.com", 465, strFromEmail, strPasswordEmail)
+	message := gomail.NewMessage()
+	message.SetHeader("From", fromAddress.String())
+	message.SetHeader("To", strToEmail)
+	message.SetHeader("Subject", "llego la ayuda")
+	message.SetBody("text/plain", strBody)
+	message.Attach("./templates/images/RandM.png")
 
-	// Send the email to Bob, Cora and Dan.
-	if err := d.DialAndSend(m); err != nil {
-		fmt.Println(err)
-	}*/
+	dial := gomail.NewDialer("smtp.gmail.com", 587, strFromEmail, strPasswordEmail)
+
+	err := dial.DialAndSend(message)
+	checkError("ERROR funSendEmailAttach: couldn't send email", err)
+	return nil
 }
