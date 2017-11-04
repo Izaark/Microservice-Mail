@@ -1,6 +1,14 @@
 package models
 
+import (
+	"time"
+)
+
 type ObjUserInfo struct {
-	Body  string `json:"body" `
-	Email string `json:"email" `
+	Email       string      `json:"email" `
+	ObjTemplate ObjTemplate `json:"template" `
+}
+type ObjTemplate struct {
+	Body string    `json:"body" `
+	Date time.Time `json:"time"`
 }
