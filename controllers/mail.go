@@ -1,12 +1,13 @@
 package controllers
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	cors "github.com/itsjamie/gin-cors"
 	"github.com/tasks/Microservice-Mail/models"
 	"gopkg.in/gomail.v2"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -29,7 +30,6 @@ func checkError(strMessage string, err error) {
 	if err != nil {
 		err = errors.New(strMessage + "->" + err.Error())
 		log.Println(err)
-		fmt.Println(err)
 	}
 }
 
@@ -43,7 +43,7 @@ func MailRouter() {
 	} else if os.Getenv("ENV_DEPLOY_MODE") == "RELEASE" {
 		gin.SetMode(gin.ReleaseMode)
 	} else {
-		fmt.Println("ERROR MailRouter: invalid environment mode")
+		log.Println("ERROR MailRouter: invalid environment mode")
 		return
 	}
 	//logFile
@@ -93,7 +93,6 @@ func handlerSendEmail(c *gin.Context) {
 	var err error
 
 	err = c.BindJSON(&vEmail)
-
 	if err != nil {
 		err = errors.New("ERROR handlerSendEmail: couldn't bind payload provided ObjUserInfo struct -> " + err.Error())
 		vginResponse = gin.H{"message": "error reading payload provided", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
@@ -107,7 +106,7 @@ func handlerSendEmail(c *gin.Context) {
 
 	switch strKey {
 	case "text":
-		err = funSendEmail(vEmail.Email, vEmail.Body)
+		err = funSendEmail(vEmail.Email, vEmail.ObjTemplate.Body)
 		if err != nil {
 			err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
 			vginResponse = gin.H{"message": "error funSendEmail", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
@@ -115,7 +114,7 @@ func handlerSendEmail(c *gin.Context) {
 			return
 		}
 	case "file":
-		err = funSendEmailAttach(vEmail.Email, vEmail.Body)
+		err = funSendEmailAttach(vEmail.Email, vEmail.ObjTemplate.Body)
 		if err != nil {
 			err = errors.New("ERROR handlerSendEmail: couldn't init funSendEmail -> " + err.Error())
 			vginResponse = gin.H{"message": "error funSendEmailAttach", "response": nil, "error": "Response Error", "status": http.StatusBadRequest}
@@ -130,18 +129,28 @@ func handlerSendEmail(c *gin.Context) {
 }
 
 //funSendEmail: generate struct email whit text
-//ToDo: Send email whit a template in html
 func funSendEmail(strToEmail, strBody string) error {
+	var buff bytes.Buffer
+	var vTemplate models.ObjTemplate
+
 	fromAddress := mail.Address{"Administración:", os.Getenv("FROM_EMAIL")}
 	strFromEmail = os.Getenv("FROM_EMAIL")
 	strPasswordEmail = os.Getenv("FROM_EMAIL_PASSWORD")
 
-	message := "From: " + fromAddress.String() + "\n" + "To: " + strToEmail + "\n" + "Subject: Bienvenid@\n\n" + strBody
+	//parse template, for matching vTemplate struct
+	templ, err := template.ParseFiles("./templates/html/email_template.html")
+	checkError("Error funSendEmail: error parsing html template", err)
 
-	err := smtp.SendMail("smtp.gmail.com:587", smtp.PlainAuth("", strFromEmail, strPasswordEmail, "smtp.gmail.com"), strFromEmail, []string{strToEmail}, []byte(message))
+	vTemplate.Date = time.Now()
+	vTemplate.Body = strBody
+	err = templ.Execute(&buff, vTemplate)
+	checkError("funSendEmail: couldn't Execute template", err)
+
+	message := "From: " + fromAddress.String() + "\n" + "To: " + strToEmail + "\n" + "Subject: Bienvenid@\n" + "Content-type: text/html" + buff.String() + "\n"
+
+	err = smtp.SendMail("smtp.gmail.com:587", smtp.PlainAuth("", strFromEmail, strPasswordEmail, "smtp.gmail.com"), strFromEmail, []string{strToEmail}, []byte(message))
 	checkError("Error funSendEmail: error smtp to get credentials", err)
 	return nil
-
 }
 
 //funSendEmailAttach: Send email whit files, in this case is a image !
